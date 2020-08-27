@@ -34,6 +34,8 @@
 #define HALLDELTAMAX	50000   // max valid Hall signal delta time (65535 MAX)
 //static_assert()
 
+#define WACHDOGTIME     0x3F    // 3F max ~ 1s
+
 void RCC_INIT(void);
 void GPIO_INIT(void);
 void EXTI_INIT(void);
@@ -79,6 +81,7 @@ void ADC_INIT(void);
 
 void PIDcalculateTask(void);
 void KeyboardTask(void);
+uint8_t keyArr[4][4];
 // uint8_t softStart(uint16_t); //todo
 volatile uint16_t EncPrescaler = 7;
 volatile uint8_t PIDcalculateFlag = 0;

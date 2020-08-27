@@ -101,11 +101,6 @@ C_INCLUDES =  \
 -I$(CMSIS_PATH)/Core/Include \
 -I$(CMSIS_PATH)/DSP/Include
 
-# -IInc \
-# -IDrivers/CMSIS/Device/ST/STM32F3xx/Include \
-# -IDrivers/CMSIS/Include \
-# -IDrivers/CMSIS/Include
-
 
 # compile gcc flags
 ASFLAGS = $(MCU) $(AS_DEFS) $(AS_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections
