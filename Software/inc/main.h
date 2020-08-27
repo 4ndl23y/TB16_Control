@@ -26,10 +26,13 @@
 #define ADC_IN3		0x03UL
 
 
-#define MOTORPULSELEN 	200
-#define WAVELEN		    10000
+#define MOTORPULSELEN   200     // length of output motor pulse
+#define WAVELEN         10000   // T/2 = 10 ms for 50Hz
+//static_assert()
+#define KF              500     // second zero cross wave detection error
 
-#define HALLDELTAMAX	50000
+#define HALLDELTAMAX	50000   // max valid Hall signal delta time (65535 MAX)
+//static_assert()
 
 void RCC_INIT(void);
 void GPIO_INIT(void);
@@ -75,8 +78,9 @@ void ADC_INIT(void);
 
 
 void PIDcalculateTask(void);
-uint8_t softStart(uint16_t);
-
+void KeyboardTask(void);
+// uint8_t softStart(uint16_t); //todo
+volatile uint16_t EncPrescaler = 7;
 volatile uint8_t PIDcalculateFlag = 0;
 volatile uint8_t pulseAllowed = 0;
 volatile uint32_t motorPulse = 0;

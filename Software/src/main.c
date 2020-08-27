@@ -1,7 +1,12 @@
+/*
+	todo:
+		- add WACHDOG timer;
+		- add and check stepper_y;
+	    - change TABs for spaces;
+*/
+
 
 #include "main.h"
-
-
 
 int main()
 {	
@@ -10,11 +15,12 @@ int main()
 	ADC_INIT();
 	TIM_INIT();
 	EXTI_INIT();
+
 	__enable_irq ();
 	
-	ADC1->CR |= ADC_CR_ADSTART; 	// start conversion
-	TIM2->CR1 |= TIM_CR1_CEN;	// hall start
-	TIM3->CR1 |= TIM_CR1_CEN;	// encoder start
+	ADC1->CR |= ADC_CR_ADSTART; // start conversion
+	TIM2->CR1 |= TIM_CR1_CEN;   // hall input capture start
+	TIM3->CR1 |= TIM_CR1_CEN;   // encoder start
 	
 	PID.Kp = 1.0;
 	PID.Ki = 0.0;
@@ -46,6 +52,10 @@ int main()
 			PIDcalculateTask();
 			PIDcalculateFlag = 0;
 		}
+
+
+
+//		KeyboardTask();
 		
 //		lv_task_handler();
 	}
@@ -54,18 +64,18 @@ int main()
 void PIDcalculateTask() 
 {
 	float32_t RPMerror;
-	uint16_t PIDoutput;
-	uint16_t RPMset;
-	
-	uint16_t HALL = HallDeltaTime; // print 
+	uint16_t PIDoutput = 0;
+	uint16_t RPMset = 0;
 	
 	if(ADC1->ISR & ADC_ISR_EOC){
 		RPMset = ADC1->DR;				// reading POT value
 		ADC1->ISR &= ~ADC_ISR_EOC;
 	}
+
 	RPMset > 20 ? (pulseAllowed = 1) : (pulseAllowed = 0);	// check ON/OFF
+
+	RPMerror = HallDeltaTime - 30000000 / (RPMset + 1);
 	
-	RPMerror = (float32_t)(RPMset) - (float32_t)((4095 * 1000) / (HallDeltaTime + 1));
 	RPMerror < 0 ? (RPMerror = 0, pulseAllowed = 0) : 0; 	// check error direction 
 	
 	PIDoutput = (uint16_t)(arm_pid_f32(&PID, RPMerror));
@@ -82,15 +92,37 @@ void PIDcalculateTask()
 	motorPulse = PIDoutput;
 }
 
+/*
+void KeyboardTask()         // TODO
+{
+	static uint8_t keyArr[4][4];
+	//for(uint8_t i = 15; i > 0; i--) keyArr[i / 4][i % 4] = 0;
+
+	for(uint8_t i = 0; i < 4; i++){
+		... // a[i] output
+		for(uint8_t j = 0; j < 4; j++){
+			if(...){   // b[j] == 1
+				keyArr[i][j] = 1;
+			}
+		}
+	}
+}
+*/
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void EXTI1_IRQHandler()		// zero cross detected
+void EXTI1_IRQHandler()		   // zero cross detected
 {
 	if(pulseAllowed){
-		TIM17->CCR1 = (uint16_t)(WAVELEN - motorPulse - MOTORPULSELEN);
-		TIM17->ARR = (uint16_t)(WAVELEN - motorPulse);
+		if(GPIOB->IDR & GPIO_IDR_1){
+			TIM17->CCR1 = (uint16_t)(WAVELEN - motorPulse - MOTORPULSELEN);
+			TIM17->ARR = (uint16_t)(WAVELEN - motorPulse);
+		}else{
+			TIM17->CCR1 = (uint16_t)(WAVELEN - motorPulse - KF - MOTORPULSELEN);
+			TIM17->ARR = (uint16_t)(WAVELEN - motorPulse - KF);
+		}
 		TIM17->CNT = 0;
 		TIM17->EGR |= TIM_EGR_UG;		// update 
 		TIM17->CR1 |= TIM_CR1_CEN; 		// start motorPulse timer
@@ -99,30 +131,41 @@ void EXTI1_IRQHandler()		// zero cross detected
 	EXTI->PR |= EXTI_PR_PR1;
 }
 
-void TIM2_IRQHandler()		// FIXME: 
+void TIM2_IRQHandler()                  // Hall sensor handler
 {
-	HallDeltaTime = TIM2->CCR1;		// get hall input capture (delta time)
-	TIM15->CNT = 0;				// reset hall wachdog tim15
+	HallDeltaTime = TIM2->CCR1;         // get hall input capture (delta time)
+	TIM15->CNT = 0;				        // reset hall wachdog tim15
 	TIM2->SR &= ~TIM_SR_CC1OF;
 	TIM2->SR &= ~TIM_SR_UIF;
 }
 
-void TIM3_IRQHandler()		// change stepper direction
+void TIM3_IRQHandler()		            // Encoder tim handler
 {
-	(TIM3->CR1 & TIM_CR1_DIR) ? (GPIOA->BSRR = GPIO_BSRR_BR_4) : (GPIOA->BSRR = GPIO_BSRR_BS_4); // change direction
+	if((TIM3->CNT & TIM_CNT_CNT) % EncPrescaler){	// Stepper pulse
+		GPIOA->BSRR = GPIO_BSRR_BS_0;
+	}else{
+		GPIOA->BSRR = GPIO_BSRR_BR_0;
+	}
+
+	if(TIM3->CR1 & TIM_CR1_DIR){        // change stepper direction
+		GPIOA->BSRR = GPIO_BSRR_BR_4;   // change direction
+	}else{
+		GPIOA->BSRR = GPIO_BSRR_BS_4;	
+	}
+
 	TIM3->SR &= ~TIM_SR_CC2IF;
 	//TIM3->SR &= ~TIM_SR_UIF;
 }
 
-void TIM15_IRQHandler()		// Hall wachdog timer
+void TIM15_IRQHandler()		            // Hall wachdog timer
 {
 	HallDeltaTime = HALLDELTAMAX;
 	TIM15->SR &= ~(TIM_SR_CC1IF 		//FIXME: DATASHEET! cc1f or cc2f? any difference
-			| TIM_SR_CC2IF
-			| TIM_SR_UIF);
+			     | TIM_SR_CC2IF
+			     | TIM_SR_UIF);
 }
 
-//void TIM16_IRQHandler()		// lvgl ticks
+//void TIM16_IRQHandler()		        // lvgl ticks
 //{
 //	lv_tick_inc(LVGL_TIM_UPD);
 //	TIM16->SR &= ~TIM_SR_UIF;
@@ -135,7 +178,7 @@ void TIM15_IRQHandler()		// Hall wachdog timer
 void RCC_INIT()
 {		
 	FLASH->ACR &= ~FLASH_ACR_LATENCY;
-	FLASH->ACR |= FLASH_ACR_LATENCY_2; /// FIXME: LATENCY_2
+	FLASH->ACR |= FLASH_ACR_LATENCY_2;         // for 48 < SystemCoreClock <= 72
 	FLASH->ACR |= FLASH_ACR_PRFTBE;
 	
 	RCC->CR |= RCC_CR_HSION;
@@ -144,16 +187,16 @@ void RCC_INIT()
 	while((RCC->CR & RCC_CR_PLLRDY) != 0); 
 	
 	RCC->CFGR |= RCC_CFGR_PLLSRC_HSI_DIV2; 		// set HSI as PLL source
-	RCC->CFGR |= RCC_CFGR_PLLMUL16			// x16
-		  | RCC_CFGR_HPRE_DIV1			// AHB PRE = 1
-		  | RCC_CFGR_PPRE1_DIV2			// APB1 PRESCKALER = 2
-		  | RCC_CFGR_PPRE2_DIV1;		// APB2 PRESCKALER = 1
+	RCC->CFGR |= RCC_CFGR_PLLMUL16			    // x16
+	          | RCC_CFGR_HPRE_DIV1              // AHB PRE = 1
+	          | RCC_CFGR_PPRE1_DIV2             // APB1 PRESCKALER = 2
+	          | RCC_CFGR_PPRE2_DIV1;	        // APB2 PRESCKALER = 1
 	
-	RCC->CFGR2 |= RCC_CFGR2_ADCPRE12_DIV1;		// ADC12 clk = PLL / 1
+	RCC->CFGR2 |= RCC_CFGR2_ADCPRE12_DIV1;      // ADC12 clk = PLL / 1
 	
 	RCC->CR |= RCC_CR_PLLON; 
 	while((RCC->CR & RCC_CR_PLLRDY) == 0); 
-	RCC->CFGR |= RCC_CFGR_SW_PLL;			// PLL selected as system clock
+	RCC->CFGR |= RCC_CFGR_SW_PLL;               // PLL selected as system clock
 	while((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL);
 	SystemCoreClockUpdate();
 	
@@ -172,17 +215,40 @@ void RCC_INIT()
 
 void GPIO_INIT()
 {
-	GPIOA->MODER |= OUTPUT << GPIO_MODER_MODER3_Pos	//STEP
-		     | OUTPUT << GPIO_MODER_MODER4_Pos		//DIR
-		     | OUTPUT << GPIO_MODER_MODER5_Pos;		//ENABLE
-	GPIOA->OSPEEDR |= MS << GPIO_OSPEEDER_OSPEEDR3_Pos;
+	//____Stepper_X__GPIOA3_GPIOA4_GPIOA5__________________________________________________________
+	GPIOA->MODER |= OUTPUT << GPIO_MODER_MODER3_Pos     //STEP_x
+	             | OUTPUT << GPIO_MODER_MODER4_Pos      //DIR_x
+	             | OUTPUT << GPIO_MODER_MODER5_Pos;     //EN_x
+	GPIOA->OSPEEDR |= HS << GPIO_OSPEEDER_OSPEEDR3_Pos;
+
+	/*
+	//____Stepper_Y_GPIOA3_GPIOA4_GPIOA5___(TODO)_______________________________________________
+	GPIOA->MODER |= OUTPUT << GPIO_MODER_MODER3_Pos     //STEP_y
+	             | OUTPUT << GPIO_MODER_MODER4_Pos      //DIR_y
+	             | OUTPUT << GPIO_MODER_MODER5_Pos;     //EN_y
+	GPIOA->OSPEEDR |= HS << GPIO_OSPEEDER_OSPEEDR3_Pos;
+	*/
+
+	//____Keyboard_GPIOB4_GPIOB5_GPIOB6_GPIOB7_GPIOB8_GPIOC13_GPIOC14_GPIOC15______________________
+	GPIOB->MODER &= ~GPIO_MODER_MODER4;                 // GPIOB4 reset (Alternate Func by default 10)
+	GPIOB->OSPEEDR &= ~GPIO_OSPEEDER_OSPEEDR4;          //    (Medium Speed by default 01)
+
+	GPIOB->MODER |= OUTPUT << GPIO_MODER_MODER4_Pos     // a0
+	             | OUTPUT << GPIO_MODER_MODER5_Pos      // a1
+				 | OUTPUT << GPIO_MODER_MODER6_Pos      // a2
+				 | OUTPUT << GPIO_MODER_MODER7_Pos;     // a3
+	GPIOB->MODER &= ~GPIO_MODER_MODER8;                 // b0
+	GPIOC->MODER &= ~(GPIO_MODER_MODER13                // b1
+	             | GPIO_MODER_MODER14                   // b2
+				 | GPIO_MODER_MODER15);                 // b3
 }
 
 void EXTI_INIT()
 {
-	GPIOB->MODER &= ~GPIO_MODER_MODER1; 	// ZeroCross interrupt (INPUT) 
-	EXTI->FTSR |= EXTI_FTSR_TR1;
-	EXTI->RTSR |= EXTI_RTSR_TR1;
+	//_____Zero_Cross_interrupt_by_falling_and_rising__EXTI1(GPIOB1)_______________________________
+	GPIOB->MODER &= ~GPIO_MODER_MODER1;             // ZeroCross interrupt (INPUT) 
+	EXTI->FTSR |= EXTI_FTSR_TR1;                    // by falling
+	EXTI->RTSR |= EXTI_RTSR_TR1;                    //    and by rising
 	EXTI->IMR |= EXTI_IMR_IM1;
 	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PB; 
 	NVIC_EnableIRQ(EXTI1_IRQn);
@@ -191,38 +257,38 @@ void EXTI_INIT()
 
 void TIM_INIT()
 {
-	//_____Hall_sensor_input_capture_mode_ch1(PA0)______________________________________________
+	//_____Hall_sensor_input_capture_mode_ch1(GPIOA0)______________________________________________
 	GPIOA->MODER |= AF << GPIO_MODER_MODER0_Pos;
 	GPIOA->AFR[0] |= 0x1 << GPIO_AFRL_AFRL0_Pos;	//AF1
 	
-	TIM2->PSC = 64 - 1;				// 1MHz 1us
-	TIM2->ARR = 60000 - 1;				// max 60000us = 60 ms					
-	TIM2->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;	// TIM2_CCR1 linked to the TI1 input (01)
+	TIM2->PSC = (SystemCoreClock / 1000000) - 1;    // 1MHz 1us
+	TIM2->ARR = 60000 - 1;                   // max 50000us = 50 ms					
+	TIM2->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;      // TIM2_CCR1 linked to the TI1 input (01)
 	TIM2->CCMR1 |= TIM_CCMR1_IC1F_0
-		    | TIM_CCMR1_IC1F;			// filter 
-	TIM2->CCER |= TIM_CCER_CC1P;			// active edge of transition
-	TIM2->DIER |= TIM_DIER_CC1IE;			// interrupt enable	
-	TIM2->CCER |= TIM_CCER_CC1E;			// capture compare enable
+	            | TIM_CCMR1_IC1F;                   // filter 
+	TIM2->CCER |= TIM_CCER_CC1P;                    // active edge of transition
+	TIM2->DIER |= TIM_DIER_CC1IE;                   // interrupt enable	
+	TIM2->CCER |= TIM_CCER_CC1E;                    // capture compare enable
 	NVIC_EnableIRQ(TIM2_IRQn);
 	NVIC_SetPriority(TIM2_IRQn, 1);
 	
-	//_____Encoder_encoder_mode_ch1(PA6)_ch2(PA7)_______________________________________________
-	GPIOA->MODER &= ~GPIO_MODER_MODER6;		//INPUT
+	//_____Encoder_encoder_mode_ch1(GPIOA6)_ch2(GPIOA7)_______________________________________________
+	GPIOA->MODER &= ~GPIO_MODER_MODER6;         // INPUT
 	GPIOA->MODER &= ~GPIO_MODER_MODER7;
 	
 	TIM3->PSC = 0;					
-	TIM3->ARR = 2000 - 1;
-	TIM3->SMCR |= 0x2 << TIM_SMCR_SMS_Pos;		// counting on TI1 edges only (010)
-	TIM3->SMCR |= TIM_SMCR_ETF_1;			// filter (0010)
-	TIM3->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;	// TI1FP1 mapped on TI1 
-	TIM3->DIER |= TIM_DIER_CC2IE;			// interrupt enable
+	TIM3->ARR = 2000 - 1;						// 2000 - encoder line number
+	TIM3->SMCR |= 0x2 << TIM_SMCR_SMS_Pos;      // counting on TI1 edges only (010)
+	TIM3->SMCR |= TIM_SMCR_ETF_1;               // filter (0010)
+	TIM3->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;  // TI1FP1 mapped on TI1 
+	TIM3->DIER |= TIM_DIER_CC2IE;               // interrupt enable
 	NVIC_EnableIRQ(TIM3_IRQn);
 	NVIC_SetPriority(TIM3_IRQn, 2);
 	
 	//_____HALL_wachdog_counter_mode_no_output_________________________________________________
-	TIM15->PSC = 64 - 1;				
+	TIM15->PSC = (SystemCoreClock / 1000000) - 1;   // 1MHz 1us	
 	TIM15->ARR = HALLDELTAMAX - 1;		
-	TIM15->DIER |= TIM_DIER_CC2IE;			// interrupt enable
+	TIM15->DIER |= TIM_DIER_CC2IE;                  // interrupt enable
 	NVIC_EnableIRQ(TIM15_IRQn);
 	NVIC_SetPriority(TIM15_IRQn, 1);
 	
@@ -232,28 +298,29 @@ void TIM_INIT()
 //	TIM16->DIER |= TIM_DIER_CC2IE;		
 //	NVIC_EnableIRQ(TIM16_IRQn);
 //	NVIC_SetPriority(TIM16_IRQn, 1);
-	
-	//_____Motor_Pulse_onePulse_mode_ch1(PB9)___________________________________________________
+
+	//_____Motor_Pulse_onePulse_mode_ch1(GPIOB9)___________________________________________________
 	GPIOB->MODER |= AF << GPIO_MODER_MODER9_Pos;
 	GPIOB->OSPEEDR |= HS << GPIO_OSPEEDER_OSPEEDR9_Pos;
 	GPIOB->PUPDR |= PULL_DOWN << GPIO_PUPDR_PUPDR9_Pos;
-	GPIOB->AFR[1] |= 0x1 << GPIO_AFRH_AFRH1_Pos; 	//AF1
+	GPIOB->AFR[1] |= 0x1 << GPIO_AFRH_AFRH1_Pos;          //AF1 
 	
-	TIM17->PSC = 64 - 1;				// 
-	TIM17->CCR1 = WAVELEN - 1;			// time delay before toggle
-	TIM17->ARR = WAVELEN + MOTORPULSELEN - 1;	// pulse length = ARR - CCR
-	//TIM17->CR1 |= TIM_CR1_URS;			// interrupt only by overflow
+	TIM17->PSC = (SystemCoreClock / 1000000) - 1;         // 1MHz 1us	
+	TIM17->CCR1 = WAVELEN - 1;                            // time delay before toggle
+	TIM17->ARR = WAVELEN + MOTORPULSELEN - 1;             // pulse length = ARR - CCR
+	//TIM17->CR1 |= TIM_CR1_URS;                          // interrupt only by overflow
 	TIM17->EGR |= TIM_EGR_UG;
 	TIM17->CR1 |= TIM_CR1_OPM;
-	TIM17->CCMR1 |= TIM_CCMR1_OC1PE;		// preload enable
-	TIM17->CCMR1 |= TIM_CCMR1_OC1M;			// 111: output compare pwm2 mode
+	TIM17->CCMR1 |= TIM_CCMR1_OC1PE;                      // preload enable
+	TIM17->CCMR1 |= TIM_CCMR1_OC1M;                       // 111: output compare pwm2 mode
 	//TIM17->CCMR1 &= ~TIM_CCMR1_CC1S;
-	TIM17->CCER |= TIM_CCER_CC1E;			// compare output channel 1 
+	TIM17->CCER |= TIM_CCER_CC1E;                         // compare output channel 1 
 	TIM17->BDTR |= TIM_BDTR_MOE;
 }
 
-void ADC_INIT()
+void ADC_INIT() // FIXME: check
 {
+    //_____Speed_set_pot_ADC1_CH3_regular conversion____________________________________________
 	GPIOA->MODER |= ANALOG << GPIO_MODER_MODER2_Pos;
 	RCC->CFGR2 |= RCC_CFGR2_ADCPRE12_DIV1;
 	
@@ -261,9 +328,9 @@ void ADC_INIT()
 	while ((ADC1->CR & ADC_CR_ADCAL) != 0);	
 	
 	ADC1->CFGR |= ADC_CFGR_CONT; 
-	ADC1->SQR1 &= ~ADC_SQR1_L;			// regular sequence length 0 = 1 channel
-	ADC1->SQR1 |= 0x3 << ADC_SQR1_SQ1_Pos;		// start convertion with channel 3
-	ADC1->SMPR1 |= 0x7 << ADC_SMPR1_SMP3_Pos;	// channel 3 sampling time 111 = 601,5 clk
+	ADC1->SQR1 &= ~ADC_SQR1_L;                  // regular sequence length 0 = 1 channel
+	ADC1->SQR1 |= 0x3 << ADC_SQR1_SQ1_Pos;      // start convertion with channel 3
+	ADC1->SMPR1 |= 0x7 << ADC_SMPR1_SMP3_Pos;   // channel 3 sampling time 111 = 601,5 clk
 	ADC1->CR |= ADC_CR_ADEN;				
 	while ((ADC1->ISR & ADC_ISR_ADRDY) == 0);
 	ADC1->CR |= ADC_CR_ADSTART;
