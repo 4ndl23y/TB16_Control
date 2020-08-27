@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "arm_c_cpp_properties",
+
+            "compilerPath": "C:/Program Files/Software/EmbeddedGCC/bin/arm-none-eabi-gcc.exe",
+            "includePath": [
+				"C:/Program Files/Software/EmbeddedGCC/arm-none-eabi/include",
+				"C:/Program Files/Software/EmbeddedGCC/arm-none-eabi/include/sys/",
+				"C:/Program Files/Software/EmbeddedGCC/lib/**",
+
+				"../../Drivers/**",
+				"${workspaceRoot}\\Src\\**",
+                "${workspaceRoot}\\Inc\\**"
+            ],
+            "defines": [
+				"STM32F303xC",
+				"M4",
+				"GCC_ARMCM4"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+			"intelliSenseMode": "gcc-x64"
+        } 
+    ],
+    "version": 4
+}
