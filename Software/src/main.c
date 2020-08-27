@@ -57,7 +57,7 @@ int main()
 //		KeyboardTask();
         
 //		lv_task_handler();
-        WWDG->CR |= (0x40 + WACHDOGTIME) << WWDG_CR_T;         // reset Wachdog tim
+        WWDG->CR |= (0x40 + WACHDOGTIME) << WWDG_CR_T_Pos;         // reset Wachdog tim
     }
 }
 
@@ -96,7 +96,7 @@ void PIDcalculateTask()
 void KeyboardTask()         // TODO (make union keyArr)
 {
     int8_t numPad = -1; 
-    static keyMode = 0; 
+    static uint8_t keyMode = 0; 
 
     if(keyArr[0][0]) numPad = 1;
     if(keyArr[0][1]) numPad = 4;
@@ -425,8 +425,8 @@ void WACHDOG_INIT()
     //_____Wachdog_timer____________________________________________________________________________
     // T(wwdg) = T(pclk) * 4096 * 2^WDGTB *(T[5:0]) = 1/64000000 * 4096 * 2^8 * 0X3F = 1032 ms
     //WWDG->CFR |= 0x7F << WWDG_CFR_W;              // refresh allowed period
-    WWDG->CFR |= 0x2 << WWDG_CFR_WDGTB;             // downcounter prescaler  10 -> div4 
-    WWDG->CR |= (0x40 + WACHDOGTIME) << WWDG_CR_T;  // reset is produced when WWDG_CR_T < 0x40 
+    WWDG->CFR |= 0x2 << WWDG_CFR_WDGTB_Pos;             // downcounter prescaler  10 -> div4 
+    WWDG->CR |= (0x40 + WACHDOGTIME) << WWDG_CR_T_Pos;  // reset is produced when WWDG_CR_T < 0x40 
     WWDG->CR |= WWDG_CR_WDGA;                       // Wachdog downcounter enable
 }
 

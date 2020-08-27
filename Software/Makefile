@@ -90,7 +90,8 @@ C_DEFS =  \
 
 
 # AS includes
-AS_INCLUDES = 
+AS_INCLUDES = \
+-IRTE/Device/STM32F303CBTx/
 
 # C includes
 C_INCLUDES =  \
