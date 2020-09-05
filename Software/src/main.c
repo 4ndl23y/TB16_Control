@@ -17,17 +17,18 @@ int main()
 
     __enable_irq ();
     
-    ADC1->CR |= ADC_CR_ADSTART; // start conversion
-    TIM2->CR1 |= TIM_CR1_CEN;   // hall input capture start
-    TIM3->CR1 |= TIM_CR1_CEN;   // encoder start
+    ADC1->CR |= ADC_CR_ADSTART; // Start conversion
+    TIM2->CR1 |= TIM_CR1_CEN;   // Hall input capture start
+    TIM15->CR1 |= TIM_CR1_CEN;  // Hall wachdog timer start
+    TIM3->CR1 |= TIM_CR1_CEN;   // Encoder timer start
     
-    PID.Kp = 1.0;
-    PID.Ki = 0.0;
-    PID.Kd = 0.0;
-    PIDoutputMax = 4000;
-    PIDoutputMin = 0;
-    arm_pid_init_f32 (&PID, 1);	// DSP lib PID init
-    
+    motor.PID.Kp = 0.7;
+    motor.PID.Ki = 0.0;
+    motor.PID.Kd = 0.0;
+    motor.PIDoutMax = 5000;
+    motor.PIDoutMin = 0;
+    arm_pid_init_f32 (&motor.PID, 1);	// DSP lib PID init
+
 //	LCD_init();
 //	TIM16->CR1 |= TIM_CR1_CEN;	//lvgl tim enable
 //	
@@ -45,14 +46,17 @@ int main()
 //	lv_spinbox_set_style(set_current, LV_SPINBOX_STYLE_BG, &main_style);
 //	lv_group_add_obj(power_group,set_current);
 
+    for(uint32_t i = 0; i < 1000000; i++); // wait
+    WACHDOG_INIT();
+
     while(1)
     {
-        if(PIDcalculateFlag){
-            PIDcalculateTask();
-            PIDcalculateFlag = 0;
-        }
 
 
+        // if(PIDcalculateFlag){
+        //     PIDcalculateTask();
+        //     PIDcalculateFlag = 0;
+        // }
 
 //		KeyboardTask();
         
@@ -72,27 +76,27 @@ void PIDcalculateTask()
         ADC1->ISR &= ~ADC_ISR_EOC;
     }
 
-    RPMset > 20 ? (pulseAllowed = 1) : (pulseAllowed = 0);	// check ON/OFF
+    RPMset > 10 ? (motor.on = 1) : (motor.on = 0);	// check ON/OFF
 
     RPMerror = HallDeltaTime - 30000000 / (RPMset + 1);
     
-    // RPMerror < 0 ? (RPMerror = 0, pulseAllowed = 0) : 0; 	// check error direction 
+    RPMerror < 0 ? (motor.on = 0) : 0; 	// check error direction 
     
-    PIDoutput = (uint16_t)(arm_pid_f32(&PID, RPMerror));
+    PIDoutput = (uint16_t)(arm_pid_f32(&motor.PID, RPMerror));
     
-    if(PIDoutput > PIDoutputMax){				// check MIN/MAX
-        PIDoutput = PIDoutputMax;
-                PID.state[2] = PIDoutputMax;
+    if(PIDoutput > motor.PIDoutMax){				// check MIN/MAX
+        PIDoutput = motor.PIDoutMax;
+                motor.PID.state[2] = motor.PIDoutMax;
     }
-    // else if(PIDoutput < PIDoutputMin){
-    //     PIDoutput = PIDoutputMin;
-    //             PID.state[2] = PIDoutputMin;
-    // }
+    else if(PIDoutput < motor.PIDoutMin){
+        PIDoutput = motor.PIDoutMin;
+                motor.PID.state[2] = motor.PIDoutMin;
+    }
     
-    motorPulse = PIDoutput;
+    motor.Pulse = PIDoutput;
 }
 
-
+/*
 void KeyboardTask()         // TODO (make union keyArr)
 {
     int8_t numPad = -1; 
@@ -133,34 +137,34 @@ void KeyboardTask()         // TODO (make union keyArr)
         }
     }
 }
-
-
+*/
 // #ifdef __cplusplus
 // extern "C" {
 // #endif
 
 void EXTI1_IRQHandler()		            // Zero Cross detected
 {
-    if(pulseAllowed){
+    if(motor.on){
         if(GPIOB->IDR & GPIO_IDR_1){    // First wave pulse
-            TIM17->CCR1 = (uint16_t)(WAVELEN - motorPulse - MOTORPULSELEN);
-            TIM17->ARR = (uint16_t)(WAVELEN - motorPulse);
+            TIM17->CCR1 = (uint16_t)(WAVELEN - motor.Pulse - MOTORPULSELEN);
+            TIM17->ARR = (uint16_t)(WAVELEN - motor.Pulse);
         }else{                          // Second wave pulse
-            TIM17->CCR1 = (uint16_t)(WAVELEN - motorPulse - KF - MOTORPULSELEN);
-            TIM17->ARR = (uint16_t)(WAVELEN - motorPulse - KF);
+            TIM17->CCR1 = (uint16_t)(WAVELEN - motor.Pulse - KF - MOTORPULSELEN);
+            TIM17->ARR = (uint16_t)(WAVELEN - motor.PIDoutMin - KF);
         }
         TIM17->CNT = 0;                 // Set counter to 0
         TIM17->EGR |= TIM_EGR_UG;		// Update
         TIM17->CR1 |= TIM_CR1_CEN; 		// Start motorPulse timer
     }
-    PIDcalculateFlag = 1;
+    motor.Calculate = 1;
     EXTI->PR |= EXTI_PR_PR1;
 }
 
+/*
 void EXTI9_5_IRQHandler()               // FIXME: rewrite keyboard handler code (EXTI9_5 and EXTI15_10)
 {
     switch(GPIOB->ODR){
-        case GPIO_ODR_4: keyArr[0][0] = 1; break;
+        case GPIO_ODR_4: keyArr[0][0] = 1; break;   // Main[THREAD].Next[1];
         case GPIO_ODR_5: keyArr[0][1] = 1; break;
         case GPIO_ODR_6: keyArr[0][2] = 1; break;
         case GPIO_ODR_7: keyArr[0][3] = 1; break;
@@ -170,7 +174,7 @@ void EXTI9_5_IRQHandler()               // FIXME: rewrite keyboard handler code 
 
 void EXTI15_10_IRQHandler()             // FIXME: rewrite keyboard handler code (EXTI9_5 and EXTI15_10)
 {
-    if(GPIOC->IDR & GPIO_IDR_13){
+    if(EXTI->PR & EXTI_PR_PR13){
         switch(GPIOB->ODR){
             case GPIO_ODR_4: keyArr[1][0] = 1; break;
             case GPIO_ODR_5: keyArr[1][1] = 1; break;
@@ -180,7 +184,7 @@ void EXTI15_10_IRQHandler()             // FIXME: rewrite keyboard handler code 
         EXTI->PR |= EXTI_PR_PR13;
     }
 
-    if(GPIOC->IDR & GPIO_IDR_14){
+    if(EXTI->PR & EXTI_PR_PR14){
         switch(GPIOB->ODR){
             case GPIO_ODR_4: keyArr[2][0] = 1; break;
             case GPIO_ODR_5: keyArr[2][1] = 1; break;
@@ -190,7 +194,7 @@ void EXTI15_10_IRQHandler()             // FIXME: rewrite keyboard handler code 
         EXTI->PR |= EXTI_PR_PR14;
     }
 
-    if(GPIOC->IDR & GPIO_IDR_15){
+    if(EXTI->PR & EXTI_PR_PR15){
         switch(GPIOB->ODR){
             case GPIO_ODR_4: keyArr[3][0] = 1; break;
             case GPIO_ODR_5: keyArr[3][1] = 1; break;
@@ -200,10 +204,12 @@ void EXTI15_10_IRQHandler()             // FIXME: rewrite keyboard handler code 
         EXTI->PR |= EXTI_PR_PR15;
     }
 }
+*/
 
 void TIM2_IRQHandler()                  // Hall sensor handler
 {
     HallDeltaTime = TIM2->CCR1;         // get hall input capture (delta time)
+    TIM2->CNT = 0;                      // set hall timer to 0
     TIM15->CNT = 0;				        // reset hall wachdog tim15
     TIM2->SR &= ~TIM_SR_CC1OF;
     TIM2->SR &= ~TIM_SR_UIF;
@@ -215,9 +221,10 @@ void TIM3_IRQHandler()		            // Encoder tim handler
 
     if(pulse){				            // Stepper pulse
         GPIOA->BSRR = GPIO_BSRR_BS_3;
-        pulse = ~pulse;
+        pulse = 0;
     }else{
         GPIOA->BSRR = GPIO_BSRR_BR_3;
+        pulse = 1;
     }
 
     if(TIM3->CR1 & TIM_CR1_DIR){        // Change stepper direction
@@ -302,14 +309,14 @@ void GPIO_INIT()
     GPIOA->OSPEEDR |= HS << GPIO_OSPEEDER_OSPEEDR3_Pos;
     */
 
-    //____Keyboard_GPIOB4_GPIOB5_GPIOB6_GPIOB7_GPIOB8_GPIOC13_GPIOC14_GPIOC15______________________
-    GPIOB->MODER &= ~GPIO_MODER_MODER4;                 // GPIOB4 reset (Alternate Func by default 10)
-    GPIOB->OSPEEDR &= ~GPIO_OSPEEDER_OSPEEDR4;          //    (Medium Speed by default 01)
+    // //____Keyboard_GPIOB4_GPIOB5_GPIOB6_GPIOB7_GPIOB8_GPIOC13_GPIOC14_GPIOC15______________________
+    // GPIOB->MODER &= ~GPIO_MODER_MODER4;                 // GPIOB4 reset (Alternate Func by default 10)
+    // GPIOB->OSPEEDR &= ~GPIO_OSPEEDER_OSPEEDR4;          //    (Medium Speed by default 01)
 
-    GPIOB->MODER |= OUTPUT << GPIO_MODER_MODER4_Pos     // a0
-                 | OUTPUT << GPIO_MODER_MODER5_Pos      // a1
-                 | OUTPUT << GPIO_MODER_MODER6_Pos      // a2
-                 | OUTPUT << GPIO_MODER_MODER7_Pos;     // a3
+    // GPIOB->MODER |= OUTPUT << GPIO_MODER_MODER4_Pos     // a0
+    //              | OUTPUT << GPIO_MODER_MODER5_Pos      // a1
+    //              | OUTPUT << GPIO_MODER_MODER6_Pos      // a2
+    //              | OUTPUT << GPIO_MODER_MODER7_Pos;     // a3
 }
 
 void EXTI_INIT()
@@ -322,7 +329,7 @@ void EXTI_INIT()
     SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI1_PB; 
     NVIC_EnableIRQ(EXTI1_IRQn);
     NVIC_SetPriority(EXTI1_IRQn, 1);	
-
+/*
     //____Keyboard_GPIOB4_GPIOB5_GPIOB6_GPIOB7_GPIOB8_GPIOC13_GPIOC14_GPIOC15______________________
     GPIOB->MODER &= ~GPIO_MODER_MODER8;                 // b0 interrupt (INPUT)
     GPIOC->MODER &= ~(GPIO_MODER_MODER13                // b1 interrupt (INPUT)
@@ -347,6 +354,7 @@ void EXTI_INIT()
     NVIC_SetPriority(EXTI9_5_IRQn, 3);	
     NVIC_EnableIRQ(EXTI15_10_IRQn);
     NVIC_SetPriority(EXTI15_10_IRQn, 3);
+*/
 }
 
 void TIM_INIT()
@@ -358,24 +366,32 @@ void TIM_INIT()
     TIM2->PSC = (SystemCoreClock / 1000000) - 1;    // 1MHz 1us
     TIM2->ARR = 60000 - 1;                   // max 50000us = 50 ms					
     TIM2->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;      // TIM2_CCR1 linked to the TI1 input (01)
-    TIM2->CCMR1 |= TIM_CCMR1_IC1F_0
-                | TIM_CCMR1_IC1F;                   // filter 
+    TIM2->CCMR1 |= TIM_CCMR1_IC1F;                   // filter 
     TIM2->CCER |= TIM_CCER_CC1P;                    // active edge of transition
     TIM2->DIER |= TIM_DIER_CC1IE;                   // interrupt enable	
     TIM2->CCER |= TIM_CCER_CC1E;                    // capture compare enable
     NVIC_EnableIRQ(TIM2_IRQn);
     NVIC_SetPriority(TIM2_IRQn, 1);
     
-    //_____Encoder_encoder_mode_ch1(GPIOA6)_ch2(GPIOA7)_______________________________________________
+    //_____Encoder_mode_tim3_ch1(GPIOA6)_ch2(GPIOA7)_______________________________________________
     GPIOA->MODER &= ~GPIO_MODER_MODER6;             // INPUT
     GPIOA->MODER &= ~GPIO_MODER_MODER7;
+
+    GPIOA->PUPDR |= PULL_UP << GPIO_PUPDR_PUPDR6_Pos; 
+    GPIOA->PUPDR |= PULL_UP << GPIO_PUPDR_PUPDR7_Pos;
+
+
+    GPIOA->AFR[0] = 0x02 << GPIO_AFRL_AFRL6_Pos;    // AF2 TIM3_ch1
+    GPIOA->AFR[0] = 0x02 << GPIO_AFRL_AFRL7_Pos;    // AF2 TIM3_ch2
     
     TIM3->PSC = 0;					
-    TIM3->ARR = 2000 - 1;						    // 2000 - encoder line number
-    TIM3->SMCR |= 0x2 << TIM_SMCR_SMS_Pos;          // counting on TI1 edges only (010)
-    TIM3->SMCR |= TIM_SMCR_ETF_1;                   // filter (0010)
-    TIM3->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;      // TI1FP1 mapped on TI1 
-    TIM3->DIER |= TIM_DIER_CC2IE;                   // interrupt enable
+    TIM3->ARR = 20 - 1;						        // 2000 - encoder line number
+    TIM3->CR1 &= ~TIM_CR1_ARPE;                     // permanently ARR update 
+    TIM3->CCMR1 |= 0x01 << TIM_CCMR1_CC1S_Pos;      // IC1 mapped on TI1 
+    TIM3->CCMR1 |= 0x01 << TIM_CCMR1_CC2S_Pos;      // IC2 mapped on TI2 
+    TIM3->SMCR |= 0x3 << TIM_SMCR_SMS_Pos;          // counting on TI1 and TI2 edges (11)
+    //TIM3->SMCR |= TIM_SMCR_ETF_1;                   // filter (0010)
+    TIM3->DIER |= TIM_DIER_CC1IE;                   // interrupt enable
     NVIC_EnableIRQ(TIM3_IRQn);
     NVIC_SetPriority(TIM3_IRQn, 2);
     

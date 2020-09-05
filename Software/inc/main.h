@@ -7,6 +7,11 @@
 #define ARM_MATH_CM4
 #include "arm_math.h"
 
+#define STATICTEST 
+#ifdef STATICTEST               // for static testing define STATICTEST
+    #include <assert.h>
+#endif
+
 //#include "lcd_init.h"
 //#include "lvgl.h"
 //#define LVGL_TIM_UPD 5 	//5 ms
@@ -28,11 +33,9 @@
 
 #define MOTORPULSELEN   200     // length of output motor pulse
 #define WAVELEN         10000   // T/2 = 10 ms for 50Hz
-//static_assert()
-#define KF              500     // second zero cross wave detection error
+#define KF              800     // second zero cross wave detection error
 
 #define HALLDELTAMAX	50000   // max valid Hall signal delta time (65535 MAX)
-//static_assert()
 
 #define WACHDOGTIME     0x3F    // 3F max ~ 1s
 
@@ -41,8 +44,7 @@ void GPIO_INIT(void);
 void EXTI_INIT(void);
 void TIM_INIT(void);
 void ADC_INIT(void);
-
-
+void WACHDOG_INIT(void);
 
 //static lv_disp_buf_t disp_buf;
 //static lv_color_t buf[LV_HOR_RES_MAX * 1];                     /*Declare a buffer for 10 lines*/
@@ -84,14 +86,119 @@ void KeyboardTask(void);
 uint8_t keyArr[4][4];
 // uint8_t softStart(uint16_t); //todo
 volatile uint16_t EncPrescaler = 7;
-volatile uint8_t PIDcalculateFlag = 0;
-volatile uint8_t pulseAllowed = 0;
-volatile uint32_t motorPulse = 0;
 volatile uint32_t HallDeltaTime = HALLDELTAMAX;
 
-arm_pid_instance_f32 PID;
-uint16_t PIDoutputMax;
-uint16_t PIDoutputMin;
+void saveEnding(void);
 
+
+struct motorStruct
+{
+    volatile uint8_t 
+        on: 1,                  // on/off
+        PIDcalculate: 1,        // calculate new value
+        softStart: 6;           // 
+    volatile uint32_t Pulse; 
+    volatile uint8_t Calculate;
+    arm_pid_instance_f32 PID;   
+    uint16_t PIDoutMax;         // max output
+    uint16_t PIDoutMin;         // min output
+} motor;
+
+struct menuStruct
+{
+    char Name[16];  // list element name
+    uint16_t value;
+    void *Func;
+    struct menuStruct *Next; 
+    struct menuStruct *Prev;
+} menu;
+
+enum{
+    THREAD,
+    ENDINGS,
+    SETTINGS
+};
+
+//struct menuStruct Main[4] =     {
+//                                "Thread", 0, NULL, Thread, NULL,
+//                                "Endings", 0, NULL, Endings, NULL,
+//                                "Settings", 0, NULL, Settings, NULL,
+//                                };
+
+//struct menuStruct Thread[20] =  {
+//                                "M03", 30, NULL, NULL, NULL,
+//                                "M04", 40, NULL, NULL, NULL,
+//                                "M05", 50, NULL, NULL, NULL,
+//                                "M06", 60, NULL, NULL, NULL,
+//                                "M07", 70, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL,
+//                                "", 1, NULL, NULL, NULL
+//                                };
+
+//struct menuStruct Endings[4] =  {
+//                                "Set_X1", 0, NULL, NULL, NULL,
+//                                "Set_X2", 0, NULL, NULL, NULL,
+//                                "Set_Y1", 0, NULL, NULL, NULL,
+//                                "Set_Y2", 0, NULL, NULL, NULL,
+//                                };
+
+//struct menuStruct Settings[6] = {
+//                                "Disp", 1, NULL, NULL, NULL,
+//                                "...", 1, NULL, NULL, NULL,
+//                                "Set_kP", 1, NULL, NULL, NULL,
+//                                "Set_kI", 1, NULL, NULL, NULL,
+//                                "Set_kD", 1, NULL, NULL, NULL,
+//                                "Reset_PID", 1, NULL, NULL, NULL
+//                                };
+
+#ifdef STATICTEST   // static test
+    //
+    static_assert((MOTORPULSELEN < WAVELEN), "MOTORPULSELEN is to long");
+    //
+    static_assert((HALLDELTAMAX < 65636), "HALLDELTAMAX > 65535");
+#endif
 
 #endif
+
+
+/*
+    Menu----+
+            |Thread-----+
+            |           |M03
+            |           |M04
+            |           |...
+            |           |M40
+            |           |Input()
+            |
+            |
+            |Endings----+
+            |           |Set_X1
+            |           |Set_X2
+            |           |Set_Y1
+            |           |Set_Y2
+            |
+            |
+            |Settings---+    
+                        |Disp
+                        |...
+                        |kp
+                        |ki
+                        |kd
+                        |...
+
+*/
+
