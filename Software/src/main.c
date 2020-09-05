@@ -27,6 +27,7 @@ int main()
     motor.PID.Kd = 0.0;
     motor.PIDoutMax = 5000;
     motor.PIDoutMin = 0;
+    motor.RPM = 0;
     arm_pid_init_f32 (&motor.PID, 1);	// DSP lib PID init
 
 //	LCD_init();
@@ -52,11 +53,10 @@ int main()
     while(1)
     {
 
-
-        // if(PIDcalculateFlag){
-        //     PIDcalculateTask();
-        //     PIDcalculateFlag = 0;
-        // }
+        if(motor.Calculate){
+            PIDcalculateTask();
+            motor.Calculate = 0;
+        }
 
 //		KeyboardTask();
         
@@ -69,16 +69,15 @@ void PIDcalculateTask()
 {
     float32_t RPMerror;
     uint16_t PIDoutput = 0;
-    uint16_t RPMset = 0;
     
     if(ADC1->ISR & ADC_ISR_EOC){
-        RPMset = ADC1->DR;				// reading POT value
+        motor.RPM = ADC1->DR;				// reading POT value
         ADC1->ISR &= ~ADC_ISR_EOC;
     }
 
-    RPMset > 10 ? (motor.on = 1) : (motor.on = 0);	// check ON/OFF
+    motor.RPM > 10 ? (motor.on = 1) : (motor.on = 0);	// check ON/OFF
 
-    RPMerror = HallDeltaTime - 30000000 / (RPMset + 1);
+    RPMerror = HallDeltaTime - 30000000 / (motor.RPM + 1);
     
     RPMerror < 0 ? (motor.on = 0) : 0; 	// check error direction 
     
@@ -440,10 +439,10 @@ void WACHDOG_INIT()
 {
     //_____Wachdog_timer____________________________________________________________________________
     // T(wwdg) = T(pclk) * 4096 * 2^WDGTB *(T[5:0]) = 1/64000000 * 4096 * 2^8 * 0X3F = 1032 ms
-    //WWDG->CFR |= 0x7F << WWDG_CFR_W;              // refresh allowed period
+    //WWDG->CFR |= 0x7F << WWDG_CFR_W;                  // refresh allowed period
     WWDG->CFR |= 0x2 << WWDG_CFR_WDGTB_Pos;             // downcounter prescaler  10 -> div4 
     WWDG->CR |= (0x40 + WACHDOGTIME) << WWDG_CR_T_Pos;  // reset is produced when WWDG_CR_T < 0x40 
-    WWDG->CR |= WWDG_CR_WDGA;                       // Wachdog downcounter enable
+    WWDG->CR |= WWDG_CR_WDGA;                           // Wachdog downcounter enable
 }
 
 void ADC_INIT() // FIXME: check

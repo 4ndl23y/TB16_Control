@@ -99,6 +99,7 @@ struct motorStruct
         softStart: 6;           // 
     volatile uint32_t Pulse; 
     volatile uint8_t Calculate;
+    uint16_t RPM;
     arm_pid_instance_f32 PID;   
     uint16_t PIDoutMax;         // max output
     uint16_t PIDoutMin;         // min output
